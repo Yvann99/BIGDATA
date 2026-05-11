@@ -2,23 +2,50 @@ import asyncio
 import random
 import time
 import pandas as pd
+import os
 from datetime import datetime
 
-# Configuration
 COMMODITIES = ['CL=F', 'GC=F', 'NG=F', 'HG=F', 'ZC=F']
 NB_MONKEYS = 10
 ORDERS_PER_MONKEY = 1000
 
+class TradingEngine:
+    def __init__(self):
+        # Le Trading Book : Position nette par produit
+        self.inventory = {product: 0 for product in COMMODITIES}
+        # Registre des trades executes
+        self.executed_trades = []
+
+    async def process_order(self, order):
+        """
+        Logique de l'Engine : Validation et Execution
+        """
+        # 1. Validation simple
+        if order['quantity'] <= 0:
+            return
+
+        # 2. Execution (Market Making)
+        # Si le client ACHETE, le Market Maker VEND (position diminue)
+        # Si le client VEND, le Market Maker ACHETE (position augmente)
+        qty = order['quantity']
+        if order['side'] == 'BUY':
+            self.inventory[order['product']] -= qty
+        else:
+            self.inventory[order['product']] += qty
+
+        # 3. Enrichissement de la donnée (Ajout du prix d'execution)
+        # Pour l'instant on utilise le target, l'algo de spread viendra a l'etape 4
+        order['execution_price'] = order['price_target']
+        order['status'] = 'EXECUTED'
+        
+        self.executed_trades.append(order)
+
 async def monkey_trader_worker(trader_id, queue, nb_orders):
-    """
-    Etape 1 : Producteur d'ordres asynchrone
-    """
     for _ in range(nb_orders):
         order = {
             "order_id": f"ord_{trader_id}_{random.getrandbits(32)}",
             "timestamp": datetime.now().isoformat(),
             "trader_id": f"trader_{trader_id}",
-            "trader_type": "MONKEY",
             "product": random.choice(COMMODITIES),
             "quantity": random.randint(1, 50),
             "side": random.choice(["BUY", "SELL"]),
@@ -27,62 +54,56 @@ async def monkey_trader_worker(trader_id, queue, nb_orders):
         await queue.put(order)
         await asyncio.sleep(random.uniform(0.0001, 0.001))
 
-async def ingestion_worker(queue, trades_storage):
+async def engine_worker(queue, engine):
     """
-    Etape 2 : Ingestion et gestion de la file d'attente
-    Consomme les ordres de la queue pour eviter l'accumulation en memoire.
+    Etape 3 : La machine Engine consomme et valide les ordres
     """
-    orders_processed = 0
-    total_expected = NB_MONKEYS * ORDERS_PER_MONKEY
+    processed = 0
+    total = NB_MONKEYS * ORDERS_PER_MONKEY
     
-    while orders_processed < total_expected:
-        # Recuperation de l'ordre dans la file
+    while processed < total:
         order = await queue.get()
         
-        # Stockage temporaire avant ecriture disque (Etape 3)
-        trades_storage.append(order)
+        # L'Engine traite l'ordre
+        await engine.process_order(order)
         
-        orders_processed += 1
-        
-        # On informe la queue que la tache est traitee
+        processed += 1
         queue.task_done()
         
-        if orders_processed % 1000 == 0:
-            print(f"Ingestion : {orders_processed} ordres recuperes dans la file...")
+        if processed % 1000 == 0:
+            print(f"Engine : {processed} ordres executes dans le Trading Book")
 
 async def main_simulation():
-    # Initialisation de la Queue (le tampon anti-Data Race)
+    if not os.path.exists('data'):
+        os.makedirs('data')
+
     order_queue = asyncio.Queue()
+    engine = TradingEngine()
     
-    # Liste de stockage en memoire vive
-    trades_storage = []
-    
-    print(f"Demarrage du systeme : {NB_MONKEYS * ORDERS_PER_MONKEY} ordres attendus")
+    print(f"Demarrage de l'Engine : Traitement de {NB_MONKEYS * ORDERS_PER_MONKEY} trades...")
     start_time = time.perf_counter()
 
-    # Lancement du consommateur (Etape 2)
-    consumer = asyncio.create_task(ingestion_worker(order_queue, trades_storage))
+    # Lancement de l'Engine (Etape 3)
+    engine_task = asyncio.create_task(engine_worker(order_queue, engine))
 
-    # Lancement des producteurs (Etape 1)
+    # Lancement des Monkey Traders (Etape 1)
     producers = [
         asyncio.create_task(monkey_trader_worker(i, order_queue, ORDERS_PER_MONKEY))
         for i in range(NB_MONKEYS)
     ]
 
-    # On attend que les producteurs terminent
     await asyncio.gather(*producers)
+    await engine_task
     
-    # On attend que le consommateur ait fini de vider la queue
-    await consumer
+    # Sauvegarde finale du Trading Book execute
+    df = pd.DataFrame(engine.executed_trades)
+    df.to_parquet('data/executed_trades.parquet', engine='pyarrow')
     
-    # Etape de persistance Big Data
-    print("Sauvegarde des donnees au format Parquet...")
-    df = pd.DataFrame(trades_storage)
-    df.to_parquet('data/raw_trades.parquet', engine='pyarrow')
+    print("--- Rapport d'inventaire final du Market Maker ---")
+    for prod, pos in engine.inventory.items():
+        print(f"{prod} : {pos}")
     
-    end_time = time.perf_counter()
-    print(f"Systeme arrete. Total traite : {len(df)} ordres.")
-    print(f"Temps total : {end_time - start_time:.2f} secondes.")
+    print(f"Simulation terminee en {time.perf_counter() - start_time:.2f}s")
 
 if __name__ == "__main__":
     asyncio.run(main_simulation())
