@@ -15,14 +15,14 @@ Le projet repose sur une architecture non-bloquante utilisant `asyncio` pour gé
 4. **Algo de Spread Dynamique :** Intelligence métier analysant l'Alpha des traders, l'élasticité au prix et les corrélations inter-produits pour ajuster les marges.
 5. **Interface Client (Streamlit) :** Dashboard interactif permettant le passage d'ordres manuels, la visualisation des positions et le suivi live des prix via API.
 
-## 🛠️ Stack Technique
+## Stack Technique
 * **Langage :** Python 3.10+
 * **Concurrence :** `asyncio` (Programmation asynchrone)
 * **Stockage Big Data :** Format **Parquet** (PyArrow) pour la performance en lecture/écriture.
 * **Visualisation :** Streamlit.
 * **Données Marché :** Intégration API (yFinance / CCXT).
 
-## 📂 Structure du Projet
+## Structure du Projet
 ```text
 ├── app/                # Frontend Streamlit
 ├── engine/             # Cœur du système (Matching & Trading Book)
