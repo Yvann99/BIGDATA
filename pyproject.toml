@@ -8,4 +8,5 @@ dependencies = [
     "asyncio>=4.0.0",
     "numpy>=2.4.4",
     "pandas>=3.0.3",
+    "pyarrow>=24.0.0",
 ]
