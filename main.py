@@ -1,117 +1,84 @@
 import asyncio
 import random
-import time
 import pandas as pd
 import os
 from datetime import datetime
 
+# Import de tes modules locaux
+from MarketTypes import Order, Trade, Quote, Side, Role
+from MatchingEngine import MatchingEngine
+from Governance import Governance
+
 COMMODITIES = ['CL=F', 'GC=F', 'NG=F', 'HG=F', 'ZC=F']
-NB_MONKEYS = 10
-ORDERS_PER_MONKEY = 1000
+NB_TRADERS = 15
+ORDERS_PER_TRADER = 100
 
-class TradingEngine:
-    def __init__(self):
-        self.inventory = {product: 0 for product in COMMODITIES}
-        self.executed_trades = []
-        # Simulation d'un prix de marche actuel
-        self.market_prices = {product: random.uniform(50, 1500) for product in COMMODITIES}
+async def market_maker_behavior(mm_id, engine, product):
+    """Simule un Market Maker qui met à jour ses prix en continu."""
+    while True:
+        base_price = random.uniform(50, 1500)
+        spread = base_price * 0.001
+        quote = Quote(
+            mm_id=mm_id, product=product,
+            bid_price=round(base_price - (spread/2), 3),
+            ask_price=round(base_price + (spread/2), 3),
+            bid_volume=random.randint(100, 500),
+            ask_volume=random.randint(100, 500)
+        )
+        engine.update_quote(quote)
+        await asyncio.sleep(0.2)
 
-    def calculate_dynamic_spread(self, product, side):
-        """
-        Etape 4 : Algorithme de spread dynamique
-        """
-        base_spread = 0.001  # 0.1% de marge de base
+async def trader_worker(trader_id, engine, governance):
+    """Simule un client envoyant des ordres."""
+    for _ in range(ORDERS_PER_TRADER):
+        product = random.choice(COMMODITIES)
+        side = random.choice([Side.BUY, Side.SELL])
+        order = Order(product=product, side=side, quantity=random.randint(1, 10), trader_id=trader_id)
         
-        # Ajustement selon l'inventaire (Gestion du risque)
-        # Si on a trop vendu (short), on augmente le prix pour les acheteurs
-        current_inv = self.inventory[product]
-        inventory_risk_adjustment = 0
-        
-        if side == 'BUY' and current_inv < -500:
-            inventory_risk_adjustment = 0.005 # +0.5% de marge pour freiner l'achat
-        elif side == 'SELL' and current_inv > 500:
-            inventory_risk_adjustment = 0.005 # +0.5% pour freiner la vente
+        trade = await engine.match_order(order)
+        if trade:
+            future_mid = trade.execution_price * random.uniform(0.999, 1.001)
+            governance.update_trader_stats(trade, future_mid)
+        await asyncio.sleep(random.uniform(0.1, 0.5))
+
+async def main_orchestrator():
+    if not os.path.exists('data'): os.makedirs('data')
+    
+    engine = MatchingEngine(commission_rate=0.0002)
+    gov = Governance(promotion_threshold=0.0001, min_trades=15)
+    
+    print("🚀 LiquidityHub Engine Running...")
+
+    # Lancement des MMs de base
+    mm_tasks = [asyncio.create_task(market_maker_behavior(f"MM_ORIGINAL_{p}", engine, p)) for p in COMMODITIES]
+    # Lancement des clients
+    trader_tasks = [asyncio.create_task(trader_worker(f"Trader_{i}", engine, gov)) for i in range(NB_TRADERS)]
+
+    try:
+        while not all(t.done() for t in trader_tasks):
+            # 1. Gestion des promotions
+            new_mms = gov.evaluate_promotions()
+            for mm_id in new_mms:
+                print(f"✨ PROMOTION : {mm_id} devient MM !")
+                mm_tasks.append(asyncio.create_task(market_maker_behavior(mm_id, engine, random.choice(COMMODITIES))))
             
-        return base_spread + inventory_risk_adjustment
-
-    async def process_order(self, order):
-        if order['quantity'] <= 0:
-            return
-
-        product = order['product']
-        side = order['side']
-        mid_price = self.market_prices[product]
-        
-        # Calcul du spread dynamique
-        spread_pct = self.calculate_dynamic_spread(product, side)
-        
-        # Calcul du prix d'execution final (Mid +/- Spread)
-        if side == 'BUY':
-            exec_price = mid_price * (1 + spread_pct)
-            self.inventory[product] -= order['quantity']
-        else:
-            exec_price = mid_price * (1 - spread_pct)
-            self.inventory[product] += order['quantity']
-
-        order['execution_price'] = round(exec_price, 3)
-        order['spread_applied'] = round(spread_pct, 5)
-        order['status'] = 'EXECUTED'
-        
-        self.executed_trades.append(order)
-        
-        # Simulation legere de variation du prix de marche
-        self.market_prices[product] *= random.uniform(0.999, 1.001)
-
-async def monkey_trader_worker(trader_id, queue, nb_orders):
-    for _ in range(nb_orders):
-        order = {
-            "order_id": f"ord_{trader_id}_{random.getrandbits(32)}",
-            "timestamp": datetime.now().isoformat(),
-            "trader_id": f"trader_{trader_id}",
-            "product": random.choice(COMMODITIES),
-            "quantity": random.randint(1, 50),
-            "side": random.choice(["BUY", "SELL"]),
-            "price_target": 0 # Sera ignore car l'engine fixe le prix maintenant
-        }
-        await queue.put(order)
-        await asyncio.sleep(random.uniform(0.0001, 0.001))
-
-async def engine_worker(queue, engine):
-    processed = 0
-    total = NB_MONKEYS * ORDERS_PER_MONKEY
-    while processed < total:
-        order = await queue.get()
-        await engine.process_order(order)
-        processed += 1
-        queue.task_done()
-
-async def main_simulation():
-    if not os.path.exists('data'):
-        os.makedirs('data')
-
-    order_queue = asyncio.Queue()
-    engine = TradingEngine()
-    
-    print("Demarrage du Trading Engine avec Spread Dynamique...")
-    start_time = time.perf_counter()
-
-    engine_task = asyncio.create_task(engine_worker(order_queue, engine))
-    producers = [asyncio.create_task(monkey_trader_worker(i, order_queue, ORDERS_PER_MONKEY)) for i in range(NB_MONKEYS)]
-
-    await asyncio.gather(*producers)
-    await engine_task
-    
-    df = pd.DataFrame(engine.executed_trades)
-    df.to_parquet('data/executed_trades.parquet', engine='pyarrow')
-    
-    print("\n--- Analyse du Trading Book ---")
-    print(df[['product', 'side', 'execution_price', 'spread_applied']].head(10))
-    
-    print("\n--- Inventaire Final ---")
-    for prod, pos in engine.inventory.items():
-        print(f"{prod} : {pos}")
-    
-    print(f"\nSimulation terminee en {time.perf_counter() - start_time:.2f}s")
+            # 2. SAUVEGARDE ATOMIQUE (Live Experience)
+            if engine.trade_history:
+                trades_dicts = [vars(t).copy() for t in engine.trade_history]
+                for t in trades_dicts:
+                    if isinstance(t['side'], Side): t['side'] = t['side'].value
+                
+                df = pd.DataFrame(trades_dicts)
+                # Écriture sécurisée : .tmp puis remplacement
+                df.to_parquet('data/executed_trades.parquet.tmp', index=False)
+                os.replace('data/executed_trades.parquet.tmp', 'data/executed_trades.parquet')
+            
+            await asyncio.sleep(1)
+    except Exception as e:
+        print(f"Erreur : {e}")
+    finally:
+        for t in mm_tasks: t.cancel()
+        print("🛑 Engine arrêté proprement.")
 
 if __name__ == "__main__":
-    asyncio.run(main_simulation())
+    asyncio.run(main_orchestrator())
