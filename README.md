@@ -1,32 +1,62 @@
-# Commodity Market Maker - Big Data Trading System
+# 🏛️ LiquidityHub: Multilateral Trading Facility (MTF) & MM Management
 
-## Présentation du Projet
-Ce projet modélise l'aspect business et technique de la gestion de données massives dans un contexte de finance de marché. L'objectif est de construire un **Trading Book** sur matières premières (Commodities) où nous agissons en tant que **Market Maker**. 
+**LiquidityHub** est une plateforme de trading haute performance conçue pour transformer l'activité de Market Making traditionnelle en un écosystème collaboratif et régulé. 
 
-Le système se porte contrepartie de chaque transaction, capture une marge (spread) et ajuste celle-ci dynamiquement en analysant le comportement des traders (détection du flux informé ou "Toxic Flow") afin de gérer la couverture et la rentabilité.
+Le projet simule une place de marché où les traders les plus performants sont identifiés par la donnée, promus au rang de **Fournisseurs de Liquidité (MM)**, et dotés de capital pour animer le marché, tandis que la plateforme agit comme un courtier centralisé (Broker) prélevant des commissions de gestion.
 
-## Architecture du Système (Pipeline Asynchrone)
+---
 
-Le projet repose sur une architecture non-bloquante utilisant `asyncio` pour gérer la haute densité d'événements :
+## 🔍 Vision Stratégique
 
-1. **Génération de Flux (Monkey Trader) :** Simulation de haute intensité générant des milliers d'ordres simultanés (ex: 10 000 ordres en 5 secondes) pour éprouver la robustesse du système.
-2. **Ingestion & Queue :** Utilisation de `asyncio.Queue` pour centraliser les flux, gérer l'asynchronisme et garantir l'intégrité des données en évitant les *Data Races*.
-3. **Moteur de Traitement (Engine) :** Consommation des ordres, validation des transactions et mise à jour en temps réel du Trading Book.
-4. **Algo de Spread Dynamique :** Intelligence métier analysant l'Alpha des traders, l'élasticité au prix et les corrélations inter-produits pour ajuster les marges.
-5. **Interface Client (Streamlit) :** Dashboard interactif permettant le passage d'ordres manuels, la visualisation des positions et le suivi live des prix via API.
+L'objectif est de posséder une armée de Market Makers spécialisés, offrant les prix les plus compétitifs du marché tout en restant sous l'ombrelle technologique et régulatrice de la plateforme.
 
-## Stack Technique
-* **Langage :** Python 3.10+
-* **Concurrence :** `asyncio` (Programmation asynchrone)
-* **Stockage Big Data :** Format **Parquet** (PyArrow) pour la performance en lecture/écriture.
-* **Visualisation :** Streamlit.
-* **Données Marché :** Intégration API (yFinance / CCXT).
+1. **Phase d'Attraction :** Utilisation de spreads ultra-serrés (produit d'appel) pour capter un flux massif de données.
+2. **Phase d'Identification :** Analyse de la sélection adverse pour repérer les traders "informés" (ceux qui ont une meilleure lecture du marché que l'algorithme de base).
+3. **Phase de Promotion :** Transformation de ces traders en Market Makers délégués.
+4. **Phase de Scalabilité :** Domination du marché par une multitude de MM anonymes agissant pour le compte du groupe.
 
-## Structure du Projet
-```text
-├── app/                # Frontend Streamlit
-├── engine/             # Cœur du système (Matching & Trading Book)
-├── analytics/          # Stratégies de Spread & Analyse comportementale
-├── ingestion/          # Monkey Traders & Gestion de la file d'attente
-├── data/               # Stockage persistant (Fichiers Parquet)
-└── main.py             # Orchestrateur du système asynchrone
+---
+
+## 🛠️ Architecture du Système
+
+### 1. Le Moteur de Matching (Matching Engine)
+Le cœur du système qui centralise tous les ordres et fait correspondre les acheteurs avec le **Meilleur Prix Anonymisé** disponible parmi les différents MM actifs.
+
+### 2. Algorithme de Gouvernance
+Pour garantir l'intégrité du marché, la plateforme impose des règles strictes :
+* **Anti-Monopole :** Empêche un seul MM de devenir "le marché" pour limiter le risque systémique.
+* **Limites d'Exposition :** Gestion dynamique du capital alloué selon la performance.
+* **Anonymat Total :** Les prix sont affichés sans l'identité du MM pour éviter l'arbitrage externe et le reverse-engineering de stratégie.
+
+### 3. Dashboard "Market Intelligence"
+Une interface temps réel affichant :
+* Le carnet d'ordres (Order Book) consolidé.
+* Le leaderboard des MM basé sur le **Taux de Réussite** et la **Consistance**.
+* Les revenus de commission générés par la plateforme.
+
+---
+
+## 📈 Indicateurs de Performance (KPIs)
+
+* **Alpha Leakage :** Mesure de la perte de valeur face aux traders informés avant leur promotion.
+* **Market Share par MM :** Suivi de la concentration de la liquidité.
+* **Commission Yield :** Rentabilité nette de la plateforme par trade effectué.
+* **Slippage Client :** Écart entre le prix demandé et le prix exécuté, garantissant la compétitivité.
+
+---
+
+## 🚀 Stack Technique
+
+* **Langage :** Python 3.11+
+* **Concurrence :** `asyncio` pour la gestion des flux d'ordres massifs.
+* **Data Processing :** `Pandas` & `PyArrow` (Format Parquet pour le Big Data).
+* **Interface :** `Streamlit` pour le dashboarding temps réel.
+* **Analyse :** `NumPy` pour les calculs de dérive de prix et scoring Alpha.
+
+---
+
+## ⚖️ Gouvernance et Conformité
+
+Le système est conçu pour simuler les exigences des régulateurs financiers :
+* **Surveillance du Marché :** Détection du Wash Trading et de la manipulation de prix.
+* **Reporting :** Historique complet des exécutions pour auditabilité totale.
