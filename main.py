@@ -43,24 +43,32 @@ async def trader_worker(trader_id, engine, governance):
         await asyncio.sleep(random.uniform(0.1, 0.5))
 
 async def check_manual_orders(engine, governance):
-    """Consomme les ordres du Terminal Trader (Dashboard) et force l'exécution au marché."""
-    path = 'data/pending_orders.json'
+    """Consomme les ordres du Terminal Trader (Dashboard) avec traçage ligne par ligne."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base_dir, 'data', 'pending_orders.json')
+    
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return
-    print("Vérification du fichier JSON...")
+
+    print(f"🔥 Fichier trouvé ! Taille : {os.path.getsize(path)} octets. Tentative de lecture...")
+
     try:
-        # 1. Lecture et vidage immédiat de la file d'attente pour éviter les doublons
-        with open(path, 'r+') as f:
+        # 1. Lecture complète des lignes
+        with open(path, 'r') as f:
             lines = f.readlines()
-            f.seek(0)
+        
+        # 2. Vidage immédiat du fichier sur le disque pour libérer VS Code et le Dashboard
+        with open(path, 'w') as f:
             f.truncate()
+        print(f"📥 {len(lines)} ligne(s) récupérée(s). File d'attente vidée sur le disque.")
             
-        for line in lines:
+        for i, line in enumerate(lines):
             if not line.strip(): 
                 continue
+            
+            print(f"🧩 Analyse de la ligne {i+1}...")
             data = json.loads(line)
             
-            # 2. Reconstruction de l'ordre client manuel
             order = Order(
                 product=data['product'],
                 side=Side.BUY if data['side'] == "BUY" else Side.SELL,
@@ -68,24 +76,26 @@ async def check_manual_orders(engine, governance):
                 trader_id=data['trader_id']
             )
             
-            print(f"📥 [LIVE] Traitement ordre client : {order.side.value} {order.quantity} {order.product}")
+            print(f"⚡ Envoi de l'ordre {order.side.value} au MatchingEngine...")
             
-            # 3. FORCE LE MATCH AU MARCHÉ (price_limit=None) pour garantir l'exécution immédiate
-            trade = await engine.match_order(order, price_limit=None)
+            # Vérification de sécurité pour le await
+            if asyncio.iscoroutinefunction(engine.match_order):
+                trade = await engine.match_order(order, price_limit=None)
+            else:
+                trade = engine.match_order(order, price_limit=None)
+                
+            print("⚙️ Retour du MatchingEngine obtenu.")
             
             if trade:
-                # Enregistrement du profil du trader manuel dans la gouvernance s'il n'existe pas
                 if order.trader_id not in governance.traders:
                     governance.traders[order.trader_id] = TraderProfile(trader_id=order.trader_id, role=Role.TRADER)
-                
-                # Mise à jour des statistiques et du CA
                 governance.update_trader_stats(trade, trade.execution_price)
-                print(f"🤝 [MATCH SUCCESS] Ordre exécuté à {trade.execution_price}$ ! Compteurs mis à jour.")
+                print(f"🤝 [MATCH SUCCESS] Ordre exécuté à {trade.execution_price}$ ! Vos compteurs vont augmenter.")
             else:
-                print(f"❌ [MATCH FAILED] Manque de volume disponible pour remplir l'ordre.")
+                print("❌ [MATCH FAILED] Le moteur n'a pas pu matcher l'ordre.")
                 
     except Exception as e:
-        print(f"⚠️ Erreur lors du traitement des ordres manuels : {e}")
+        print(f"💥 CRASH DANS LA LECTURE : {e}")
 
 async def main_orchestrator():
     if not os.path.exists('data'): os.makedirs('data')
