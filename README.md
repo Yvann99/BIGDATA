@@ -1,62 +1,66 @@
-# 🏛️ LiquidityHub: Multilateral Trading Facility (MTF) & MM Management
+# 🏛️ LiquidityHub: Multilateral Trading Facility (MTF) & Hybrid Liquidity Marketplace
 
-**LiquidityHub** est une plateforme de trading haute performance conçue pour transformer l'activité de Market Making traditionnelle en un écosystème collaboratif et régulé. 
-
-Le projet simule une place de marché où les traders les plus performants sont identifiés par la donnée, promus au rang de **Fournisseurs de Liquidité (MM)**, et dotés de capital pour animer le marché, tandis que la plateforme agit comme un courtier centralisé (Broker) prélevant des commissions de gestion.
+**LiquidityHub** est une plateforme de marché hybride évolutive conçue pour transformer l'activité de Market Making traditionnelle en un écosystème collaboratif, régulé et dicté par la donnée (*Data-Driven*).
 
 ---
 
-## 🔍 Vision Stratégique
+## 🔍 Vision Stratégique & Modèle Évolutif
 
-L'objectif est de posséder une armée de Market Makers spécialisés, offrant les prix les plus compétitifs du marché tout en restant sous l'ombrelle technologique et régulatrice de la plateforme.
+Le projet résout le problème de la **sélection adverse** en inversant le rapport de force entre la plateforme et les traders informés à travers un déploiement en trois phases.
 
-1. **Phase d'Attraction :** Utilisation de spreads ultra-serrés (produit d'appel) pour capter un flux massif de données.
-2. **Phase d'Identification :** Analyse de la sélection adverse pour repérer les traders "informés" (ceux qui ont une meilleure lecture du marché que l'algorithme de base).
-3. **Phase de Promotion :** Transformation de ces traders en Market Makers délégués.
-4. **Phase de Scalabilité :** Domination du marché par une multitude de MM anonymes agissant pour le compte du groupe.
+### Phase 1 : L'Amorçage (La Plateforme est MM)
+* **L'attraction :** La plateforme utilise ses propres algorithmes et son capital pour afficher des prix d'achat au plus haut et des prix de vente au plus bas (spreads ultra-serrés).
+* **Le but :** Servir de produit d'appel pour forcer les traders du marché à venir exécuter leurs ordres chez nous, générant ainsi une masse critique de données brutes.
+* **Le risque :** Accepter de subir des pertes initiales face aux traders "informés" pour découvrir leur identité et capturer leur comportement.
+
+### Phase 2 : L'Analyse Post-Trade (Le Scouting)
+* **Capture des flux :** Stockage permanent et asynchrone de toutes les exécutions au format haute performance **Parquet**.
+* **Calcul de l'Alpha Score :** Mesure mathématique du décalage des cours après chaque trade. Si le prix du marché décale systématiquement dans le sens d'un client juste après son exécution, la plateforme identifie un "trader informé" possédant une information supérieure à notre propre algorithme.
+
+### Phase 3 : La Plateforme devient Courtier (La Plateforme possède les MM)
+* **La bascule automatique :** La gouvernance promeut ces traders d'élite du statut de `TRADER` à `MARKET_MAKER`.
+* **Le transfert de risque :** Les traders promus déploient leur propre capital et leurs algorithmes supérieurs pour animer le marché à notre place.
+* **Monétisation finale :** La plateforme se retire progressivement du risque de marché direct pour devenir un courtier pur, encaissant une commission sur chaque match entre clients et MM promus.
 
 ---
 
 ## 🛠️ Architecture du Système
 
-### 1. Le Moteur de Matching (Matching Engine)
-Le cœur du système qui centralise tous les ordres et fait correspondre les acheteurs avec le **Meilleur Prix Anonymisé** disponible parmi les différents MM actifs.
+### 1. Le Moteur de Matching (`MatchingEngine.py`)
+Le cœur du système qui centralise tous les ordres et fait correspondre les acheteurs avec le **Meilleur Prix Anonymisé** disponible parmi les différents MM actifs (le MM Original de la plateforme ou les MM promus).
 
-### 2. Algorithme de Gouvernance
-Pour garantir l'intégrité du marché, la plateforme impose des règles strictes :
-* **Anti-Monopole :** Empêche un seul MM de devenir "le marché" pour limiter le risque systémique.
-* **Limites d'Exposition :** Gestion dynamique du capital alloué selon la performance.
-* **Anonymat Total :** Les prix sont affichés sans l'identité du MM pour éviter l'arbitrage externe et le reverse-engineering de stratégie.
+### 2. Algorithme de Gouvernance (`Governance.py`)
+Pour garantir l'intégrité du marché et la gestion du cycle de vie des membres :
+* **Scouting d'Alpha :** Traitement statistique des métriques post-trade pour détecter le flux toxique/informé.
+* **Anti-Monopole :** Calcul de la concentration de la liquidité (Indice HHI) pour empêcher un seul MM externe de saturer le carnet d'ordres.
+* **Anonymat Total :** Les identités réelles des MM sont masquées derrière des alias (`LP-XXXXXX`) pour protéger leurs stratégies du reverse-engineering.
 
-### 3. Dashboard "Market Intelligence"
-Une interface temps réel affichant :
-* Le carnet d'ordres (Order Book) consolidé.
-* Le leaderboard des MM basé sur le **Taux de Réussite** et la **Consistance**.
-* Les revenus de commission générés par la plateforme.
+### 3. Dashboard Temps Réel (`Dashboard.py`)
+Une interface opérateur complète développée sous **Streamlit** intégrant :
+* Le carnet d'ordres consolidé (Best Bid / Best Offer).
+* Le leaderboard anonymisé des fournisseurs de liquidité.
+* Le panneau de contrôle du volume et de passage d'ordres clients (Terminal Trader).
+* Le monitoring des commissions de courtage générées en direct.
 
 ---
 
-## 📈 Indicateurs de Performance (KPIs)
+## ⚖️ Différence Structurelle : Trader vs Market Maker
 
-* **Alpha Leakage :** Mesure de la perte de valeur face aux traders informés avant leur promotion.
-* **Market Share par MM :** Suivi de la concentration de la liquidité.
-* **Commission Yield :** Rentabilité nette de la plateforme par trade effectué.
-* **Slippage Client :** Écart entre le prix demandé et le prix exécuté, garantissant la compétitivité.
+Le passage du statut de client à celui de partenaire modifie radicalement la mécanique d'interaction avec l'infrastructure :
+
+| Caractéristique | En tant que TRADER (Subit le marché) | En tant que MARKET_MAKER (Fait le marché) |
+| :--- | :--- | :--- |
+| **Type de Message** | Ordres directionnels et asymétriques (Achat OU Vente). | Message unique : La `Quote` (Double-Cote simultanée). |
+| **Exécution** | Doit séquencer ses ordres dans le temps pour ouvrir/fermer une position. | Affiche ses prix d'achat (Bid) et de vente (Ask) en continu. |
+| **Complexité** | Supporte la gestion du timing et le risque d'exécution. | Laisse le moteur insérer ses prix tout en haut du carnet via le badge *Verified LP*. |
+| **Rémunération** | Paye le spread ou la commission pour entrer sur le marché. | Capture le *spread* de manière passive en fournissant de la liquidité. |
 
 ---
 
 ## 🚀 Stack Technique
 
-* **Langage :** Python 3.11+
-* **Concurrence :** `asyncio` pour la gestion des flux d'ordres massifs.
-* **Data Processing :** `Pandas` & `PyArrow` (Format Parquet pour le Big Data).
-* **Interface :** `Streamlit` pour le dashboarding temps réel.
-* **Analyse :** `NumPy` pour les calculs de dérive de prix et scoring Alpha.
-
----
-
-## ⚖️ Gouvernance et Conformité
-
-Le système est conçu pour simuler les exigences des régulateurs financiers :
-* **Surveillance du Marché :** Détection du Wash Trading et de la manipulation de prix.
-* **Reporting :** Historique complet des exécutions pour auditabilité totale.
+* **Langage :** Python 3.11+ (Optimisé pour Python 3.14+)
+* **Concurrence & Asynchronisme :** `asyncio` pour la gestion simultanée des flux de cotation et des carnets d'ordres.
+* **Stockage de Données :** `Pandas` & `PyArrow` (Format Parquet avec mécanisme d'écriture atomique via Shadow Writing).
+* **Communication Inter-Processus :** File d'attente asynchrone sur disque (`pending_orders.json`) assurant le découplage entre le serveur Web et le moteur d'exécution.
+* **Interface Graphique :** `Streamlit` avec architecture moderne en `st.fragment` pour le rafraîchissement haute fréquence.
