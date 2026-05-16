@@ -29,20 +29,29 @@ class MatchingEngine:
             # Le client veut vendre -> On cherche le prix d'achat (BID) le plus haut des MM
             return max(product_quotes.values(), key=lambda q: q.bid_price)
 
-    async def match_order(self, order: Order) -> Optional[Trade]:
+    async def match_order(self, order: Order, price_limit: Optional[float] = None) -> Optional[Trade]:
         """Tente de faire correspondre un ordre client avec la meilleure quote MM."""
         best_q = self.get_best_quote(order.product, order.side)
         
         if not best_q:
             return None
 
-        # Vérification sommaire de la liquidité (volume)
+        # 1. Vérification de la compatibilité des prix si un prix limite est spécifié
+        if price_limit is not None:
+            if order.side == Side.BUY and best_q.ask_price > price_limit:
+                # Le vendeur est plus cher que la limite maximale de l'acheteur
+                return None
+            elif order.side == Side.SELL and best_q.bid_price < price_limit:
+                # L'acheteur propose moins que la limite minimale du vendeur
+                return None
+
+        # 2. Vérification de la liquidité (volume)
         if order.side == Side.BUY and best_q.ask_volume < order.quantity:
             return None # Pas assez de stock chez ce MM
         elif order.side == Side.SELL and best_q.bid_volume < order.quantity:
             return None
 
-        # Détermination du prix d'exécution
+        # Détermination du prix d'exécution (Prix de la quote du MM)
         exec_price = best_q.ask_price if order.side == Side.BUY else best_q.bid_price
         
         # Calcul de la commission de la plateforme
@@ -64,7 +73,7 @@ class MatchingEngine:
 
         self.trade_history.append(trade)
         
-        # Mise à jour fictive du volume restant chez le MM (pour la simulation)
+        # Mise à jour du volume restant chez le MM
         if order.side == Side.BUY:
             best_q.ask_volume -= order.quantity
         else:
