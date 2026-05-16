@@ -118,7 +118,7 @@ async def main_orchestrator():
                 df.to_parquet('data/executed_trades.parquet.tmp', index=False)
                 os.replace('data/executed_trades.parquet.tmp', 'data/executed_trades.parquet')
             
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.1)
             
     except Exception as e:
         print(f"Erreur Moteur : {e}")
