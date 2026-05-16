@@ -13,31 +13,25 @@ from Governance import Governance
 
 COMMODITIES = ['CL=F', 'GC=F', 'NG=F', 'HG=F', 'ZC=F']
 NB_TRADERS = 15
-ORDERS_PER_TRADER = 100
 
 def get_real_market_price(product: str) -> float:
     """Récupère le dernier prix réel sur Yahoo Finance."""
     try:
         ticker = yf.Ticker(product)
-        # fast_info['last_price'] donne le dernier prix disponible en temps réel
         price = ticker.fast_info['last_price']
         if price and price > 0:
             return float(price)
-    except Exception as e:
-        # En cas de coupure API ou marché fermé, prix de secours historiques
-        fallback = {'CL=F': 75.0, 'GC=F': 2350.0, 'NG=F': 2.50, 'HG=F': 4.50, 'ZC=F': 4.60}
-        return fallback.get(product, 100.0)
+    except Exception:
+        pass
     
-    fallback = {'CL=F': 75.0, 'GC=F': 2350.0, 'NG=F': 2.50, 'HG=F': 4.50, 'ZC=F': 4.60}
+    # Prix de secours réalistes si le marché est fermé (Week-end) ou si l'API coupe
+    fallback = {'CL=F': 105.0, 'GC=F': 2350.0, 'NG=F': 2.50, 'HG=F': 4.50, 'ZC=F': 4.60}
     return fallback.get(product, 100.0)
 
 async def market_maker_behavior(mm_id, engine, product):
     """Simule un Market Maker calé sur les prix réels de l'API Finance."""
     while True:
-        # 1. On va chercher le VRAI PRIX du marché
         base_price = get_real_market_price(product)
-        
-        # 2. Le MM crée un spread ultra-serré autour du vrai prix (0.05%)
         spread = base_price * 0.0005
         quote = Quote(
             mm_id=mm_id, product=product,
@@ -47,12 +41,11 @@ async def market_maker_behavior(mm_id, engine, product):
             ask_volume=random.randint(100, 500)
         )
         engine.update_quote(quote)
-        # Mise à jour toutes les secondes pour ne pas surcharger l'API gratuite
         await asyncio.sleep(1.0)
 
 async def trader_worker(trader_id, engine, governance):
-    """Simule un client automatique envoyant des ordres."""
-    for _ in range(ORDERS_PER_TRADER):
+    """Simule un client automatique envoyant des ordres À L'INFINI."""
+    while True:
         product = random.choice(COMMODITIES)
         side = random.choice([Side.BUY, Side.SELL])
         order = Order(product=product, side=side, quantity=random.randint(1, 10), trader_id=trader_id)
@@ -61,6 +54,7 @@ async def trader_worker(trader_id, engine, governance):
         if trade:
             future_mid = trade.execution_price * random.uniform(0.999, 1.001)
             governance.update_trader_stats(trade, future_mid)
+            
         await asyncio.sleep(random.uniform(0.5, 1.5))
 
 async def check_manual_orders(engine, governance):
@@ -93,15 +87,15 @@ async def check_manual_orders(engine, governance):
             trade = await engine.match_order(order, price_limit=None)
             
             if trade:
-                if order.trader_id not in governance.traders:
-                    governance.traders[order.trader_id] = TraderProfile(trader_id=order.trader_id, role=Role.TRADER)
-                
+                # CORRECTION : On utilise directement la méthode update_trader_stats.
+                # Si le trader n'existe pas dans la gouvernance, cette méthode l'initialise automatiquement
+                # en interne, ce qui nous évite de manipuler directement l'attribut caché.
                 governance.update_trader_stats(trade, trade.execution_price)
-                print(f"🤝 [MATCH SUCCESS] Ordre exécuté au prix réel de {trade.execution_price}$ !")
+                print(f"🤝 [MATCH SUCCESS] Ordre manuel exécuté au prix réel de {trade.execution_price}$ !")
                 
     except Exception as e:
         print(f"⚠️ Erreur lors du traitement des ordres manuels : {e}")
-
+        
 async def main_orchestrator():
     if not os.path.exists('data'): os.makedirs('data')
     
@@ -112,7 +106,7 @@ async def main_orchestrator():
 
     # Lancement des MMs connectés à l'API pour chaque commodité
     mm_tasks = [asyncio.create_task(market_maker_behavior(f"MM_REALTIME_{p}", engine, p)) for p in COMMODITIES]
-    # Lancement des clients simulés
+    # Lancement des clients simulés à l'infini
     trader_tasks = [asyncio.create_task(trader_worker(f"Trader_{i}", engine, gov)) for i in range(NB_TRADERS)]
 
     try:
@@ -138,7 +132,7 @@ async def main_orchestrator():
     except Exception as e:
         print(f"Erreur Moteur : {e}")
     finally:
-        for t in mm_tasks: t.cancel()
+        for t in mm_tasks + trader_tasks: t.cancel()
         print("🛑 Engine arrêté proprement.")
 
 if __name__ == "__main__":
