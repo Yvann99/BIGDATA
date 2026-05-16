@@ -3,35 +3,34 @@ import random
 import pandas as pd
 import os
 import json
-from datetime import datetime
 import yfinance as yf
-
-# Import de tes modules locaux
-from MarketTypes import Order, Trade, Quote, Side, Role, TraderProfile
-from MatchingEngine import MatchingEngine
-from Governance import Governance
 
 COMMODITIES = ['CL=F', 'GC=F', 'NG=F', 'HG=F', 'ZC=F']
 NB_TRADERS = 15
 
-def get_real_market_price(product: str) -> float:
-    """Récupère le dernier prix réel sur Yahoo Finance."""
-    try:
-        ticker = yf.Ticker(product)
-        price = ticker.fast_info['last_price']
-        if price and price > 0:
-            return float(price)
-    except Exception:
-        pass
-    
-    # Prix de secours réalistes si le marché est fermé (Week-end) ou si l'API coupe
-    fallback = {'CL=F': 105.0, 'GC=F': 2350.0, 'NG=F': 2.50, 'HG=F': 4.50, 'ZC=F': 4.60}
-    return fallback.get(product, 100.0)
+# Dictionnaire global pour stocker les derniers prix de l'API en mémoire
+current_market_prices = {'CL=F': 105.0, 'GC=F': 2350.0, 'NG=F': 2.50, 'HG=F': 4.50, 'ZC=F': 4.60}
+
+from MarketTypes import Order, Trade, Quote, Side, Role, TraderProfile
+from MatchingEngine import MatchingEngine
+from Governance import Governance
+
+def update_real_market_prices():
+    """Va chercher les vrais prix sur Yahoo Finance et met à jour la mémoire du moteur."""
+    global current_market_prices
+    for p in COMMODITIES:
+        try:
+            ticker = yf.Ticker(p)
+            price = ticker.fast_info['last_price']
+            if price and price > 0:
+                current_market_prices[p] = round(float(price), 3)
+        except Exception:
+            pass # Conserve la valeur précédente ou le fallback en cas d'échec
 
 async def market_maker_behavior(mm_id, engine, product):
     """Simule un Market Maker calé sur les prix réels de l'API Finance."""
     while True:
-        base_price = get_real_market_price(product)
+        base_price = current_market_prices.get(product, 100.0)
         spread = base_price * 0.0005
         quote = Quote(
             mm_id=mm_id, product=product,
@@ -58,7 +57,7 @@ async def trader_worker(trader_id, engine, governance):
         await asyncio.sleep(random.uniform(0.5, 1.5))
 
 async def check_manual_orders(engine, governance):
-    """Consomme les ordres du Terminal Trader (Dashboard) et force l'exécution au marché."""
+    """Consomme les ordres du Terminal Trader ET les quotes personnalisées du MM."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(base_dir, 'data', 'pending_orders.json')
     
@@ -77,25 +76,29 @@ async def check_manual_orders(engine, governance):
                 continue
             data = json.loads(line)
             
-            order = Order(
-                product=data['product'],
-                side=Side.BUY if data['side'] == "BUY" else Side.SELL,
-                quantity=data['quantity'],
-                trader_id=data['trader_id']
-            )
-            
-            trade = await engine.match_order(order, price_limit=None)
-            
-            if trade:
-                # CORRECTION : On utilise directement la méthode update_trader_stats.
-                # Si le trader n'existe pas dans la gouvernance, cette méthode l'initialise automatiquement
-                # en interne, ce qui nous évite de manipuler directement l'attribut caché.
-                governance.update_trader_stats(trade, trade.execution_price)
-                print(f"🤝 [MATCH SUCCESS] Ordre manuel exécuté au prix réel de {trade.execution_price}$ !")
+            # DISTINCTION : Est-ce une Quote manuelle du MM ou un Ordre classique ?
+            if data.get('type') == 'QUOTE_MM':
+                quote = Quote(
+                    mm_id=data['trader_id'], product=data['product'],
+                    bid_price=data['bid_price'], ask_price=data['ask_price'],
+                    bid_volume=data['volume'], ask_volume=data['volume']
+                )
+                engine.update_quote(quote)
+                print(f"⚡ [MM LIVE] Nouvelles quotes injectées pour {quote.product} : Bid={quote.bid_price} / Ask={quote.ask_price}")
+            else:
+                # Ordre classique
+                order = Order(
+                    product=data['product'], side=Side.BUY if data['side'] == "BUY" else Side.SELL,
+                    quantity=data['quantity'], trader_id=data['trader_id']
+                )
+                trade = await engine.match_order(order, price_limit=None)
+                if trade:
+                    governance.update_trader_stats(trade, trade.execution_price)
+                    print(f"🤝 [MATCH SUCCESS] Ordre manuel exécuté à {trade.execution_price}$ !")
                 
     except Exception as e:
-        print(f"⚠️ Erreur lors du traitement des ordres manuels : {e}")
-        
+        print(f"⚠️ Erreur traitement flux manuel : {e}")
+
 async def main_orchestrator():
     if not os.path.exists('data'): os.makedirs('data')
     
@@ -104,36 +107,48 @@ async def main_orchestrator():
     
     print("🚀 LiquidityHub Engine Running with Real-Time Finance API...")
 
-    # Lancement des MMs connectés à l'API pour chaque commodité
     mm_tasks = [asyncio.create_task(market_maker_behavior(f"MM_REALTIME_{p}", engine, p)) for p in COMMODITIES]
-    # Lancement des clients simulés à l'infini
     trader_tasks = [asyncio.create_task(trader_worker(f"Trader_{i}", engine, gov)) for i in range(NB_TRADERS)]
 
     try:
         while True:
+            # 1. Mise à jour des cours réels
+            update_real_market_prices()
+            
+            # 2. Lecture des ordres/quotes du Dashboard
             await check_manual_orders(engine, gov)
             
+            # 3. Promotions
             new_mms = gov.evaluate_promotions()
             for mm_id in new_mms:
-                print(f"✨ PROMOTION : {mm_id} devient MM (Badge Verified LP) !")
                 mm_tasks.append(asyncio.create_task(market_maker_behavior(mm_id, engine, random.choice(COMMODITIES))))
             
+            # 4. Sauvegarde Parquet enrichie (Correction pour ne pas bloquer la Gouvernance)
             if engine.trade_history:
+                # On crée une copie superficielle pour le Dashboard pour ne pas polluer la mémoire du moteur
                 trades_dicts = [vars(t).copy() for t in engine.trade_history]
                 for t in trades_dicts:
-                    if isinstance(t['side'], Side): t['side'] = t['side'].value
+                    if isinstance(t['side'], Side): 
+                        t['side'] = t['side'].value
                 
                 df = pd.DataFrame(trades_dicts)
+                
+                # Sauvegarde brute pour la Gouvernance (si elle lit le Parquet en interne)
                 df.to_parquet('data/executed_trades.parquet.tmp', index=False)
                 os.replace('data/executed_trades.parquet.tmp', 'data/executed_trades.parquet')
-            
-            await asyncio.sleep(0.1)
+                
+                # Sauvegarde enrichie SPECIFIQUE pour le Dashboard (avec un autre nom pour isoler les prix d'API)
+                df_dash = df.copy()
+                for p in COMMODITIES:
+                    df_dash[f"ref_price_{p}"] = current_market_prices[p]
+                
+                df_dash.to_parquet('data/dashboard_trades.parquet.tmp', index=False)
+                os.replace('data/dashboard_trades.parquet.tmp', 'data/dashboard_trades.parquet')
             
     except Exception as e:
         print(f"Erreur Moteur : {e}")
     finally:
         for t in mm_tasks + trader_tasks: t.cancel()
-        print("🛑 Engine arrêté proprement.")
 
 if __name__ == "__main__":
     asyncio.run(main_orchestrator())
