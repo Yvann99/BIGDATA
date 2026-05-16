@@ -2,6 +2,7 @@ import asyncio
 import random
 import pandas as pd
 import os
+import json
 from datetime import datetime
 
 # Import de tes modules locaux
@@ -41,6 +42,47 @@ async def trader_worker(trader_id, engine, governance):
             governance.update_trader_stats(trade, future_mid)
         await asyncio.sleep(random.uniform(0.1, 0.5))
 
+async def check_manual_orders(engine, governance):
+    """Consomme les ordres du Terminal Trader (Dashboard) en attente."""
+    path = 'data/pending_orders.json'
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return
+
+    try:
+        # Lecture et vidage atomique de la file d'attente
+        with open(path, 'r+') as f:
+            lines = f.readlines()
+            f.seek(0)
+            f.truncate()
+            
+        for line in lines:
+            if not line.strip(): 
+                continue
+            data = json.loads(line)
+            
+            # Reconstruction de l'ordre client 
+            # Note : Si ton MatchingEngine gère les ordres limites via un paramètre prix, 
+            # tu pourras lui passer : price=data['price']
+            order = Order(
+                product=data['product'],
+                side=Side.BUY if data['side'] == "BUY" else Side.SELL,
+                quantity=data['quantity'],
+                trader_id=data['trader_id']
+            )
+            
+            print(f"📥 [LIVE] Traitement ordre client : {order.side.value} {order.quantity} {order.product} (Limite: {data['price']}$)")
+            
+            # Exécution de l'ordre sur le carnet consolidé
+            trade = await engine.match_order(order)
+            if trade:
+                governance.update_trader_stats(trade, trade.execution_price)
+                print(f"🤝 [MATCH] Ordre client exécuté au prix de {trade.execution_price}$")
+            else:
+                print(f"❌ [MISSED] Aucun prix disponible sur le marché pour remplir l'ordre.")
+                
+    except Exception as e:
+        print(f"⚠️ Erreur lors du traitement des ordres manuels : {e}")
+
 async def main_orchestrator():
     if not os.path.exists('data'): os.makedirs('data')
     
@@ -49,33 +91,37 @@ async def main_orchestrator():
     
     print("🚀 LiquidityHub Engine Running...")
 
-    # Lancement des MMs de base
+    # Lancement des MMs de base (Amorçage de la liquidité)
     mm_tasks = [asyncio.create_task(market_maker_behavior(f"MM_ORIGINAL_{p}", engine, p)) for p in COMMODITIES]
-    # Lancement des clients
+    # Lancement des clients simulés
     trader_tasks = [asyncio.create_task(trader_worker(f"Trader_{i}", engine, gov)) for i in range(NB_TRADERS)]
 
     try:
         while not all(t.done() for t in trader_tasks):
-            # 1. Gestion des promotions
+            # 1. Vérification et consommation du flux d'ordres manuels (Dashboard)
+            await check_manual_orders(engine, gov)
+            
+            # 2. Gestion des promotions via l'Alpha Score
             new_mms = gov.evaluate_promotions()
             for mm_id in new_mms:
-                print(f"✨ PROMOTION : {mm_id} devient MM !")
+                print(f"✨ PROMOTION : {mm_id} devient MM (Badge Verified LP) !")
                 mm_tasks.append(asyncio.create_task(market_maker_behavior(mm_id, engine, random.choice(COMMODITIES))))
             
-            # 2. SAUVEGARDE ATOMIQUE (Live Experience)
+            # 3. SAUVEGARDE ATOMIQUE (Format Parquet pour le Dashboard)
             if engine.trade_history:
                 trades_dicts = [vars(t).copy() for t in engine.trade_history]
                 for t in trades_dicts:
                     if isinstance(t['side'], Side): t['side'] = t['side'].value
                 
                 df = pd.DataFrame(trades_dicts)
-                # Écriture sécurisée : .tmp puis remplacement
+                # Utilisation du fichier temporaire pour éviter les conflits de lecture concurrents
                 df.to_parquet('data/executed_trades.parquet.tmp', index=False)
                 os.replace('data/executed_trades.parquet.tmp', 'data/executed_trades.parquet')
             
             await asyncio.sleep(1)
+            
     except Exception as e:
-        print(f"Erreur : {e}")
+        print(f"Erreur Moteur : {e}")
     finally:
         for t in mm_tasks: t.cancel()
         print("🛑 Engine arrêté proprement.")
