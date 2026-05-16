@@ -1,66 +1,50 @@
-# 🏛️ LiquidityHub: Multilateral Trading Facility (MTF) & Hybrid Liquidity Marketplace
+# LiquidityHub - Simulateur de Marché Asynchrone et Tableau de Bord Multi-Profils
 
-**LiquidityHub** est une plateforme de marché hybride évolutive conçue pour transformer l'activité de Market Making traditionnelle en un écosystème collaboratif, régulé et dicté par la donnée (*Data-Driven*).
+LiquidityHub est une plateforme de simulation de marché financier (matching engine) développée en Python. Elle combine un moteur d'exécution d'ordres asynchrone connecté à l'API Yahoo Finance, un module de gouvernance algorithmique (Alpha Score), et une interface utilisateur interactive multi-profils développée avec Streamlit.
 
----
-
-## 🔍 Vision Stratégique & Modèle Évolutif
-
-Le projet résout le problème de la **sélection adverse** en inversant le rapport de force entre la plateforme et les traders informés à travers un déploiement en trois phases.
-
-### Phase 1 : L'Amorçage (La Plateforme est MM)
-* **L'attraction :** La plateforme utilise ses propres algorithmes et son capital pour afficher des prix d'achat au plus haut et des prix de vente au plus bas (spreads ultra-serrés).
-* **Le but :** Servir de produit d'appel pour forcer les traders du marché à venir exécuter leurs ordres chez nous, générant ainsi une masse critique de données brutes.
-* **Le risque :** Accepter de subir des pertes initiales face aux traders "informés" pour découvrir leur identité et capturer leur comportement.
-
-### Phase 2 : L'Analyse Post-Trade (Le Scouting)
-* **Capture des flux :** Stockage permanent et asynchrone de toutes les exécutions au format haute performance **Parquet**.
-* **Calcul de l'Alpha Score :** Mesure mathématique du décalage des cours après chaque trade. Si le prix du marché décale systématiquement dans le sens d'un client juste après son exécution, la plateforme identifie un "trader informé" possédant une information supérieure à notre propre algorithme.
-
-### Phase 3 : La Plateforme devient Courtier (La Plateforme possède les MM)
-* **La bascule automatique :** La gouvernance promeut ces traders d'élite du statut de `TRADER` à `MARKET_MAKER`.
-* **Le transfert de risque :** Les traders promus déploient leur propre capital et leurs algorithmes supérieurs pour animer le marché à notre place.
-* **Monétisation finale :** La plateforme se retire progressivement du risque de marché direct pour devenir un courtier pur, encaissant une commission sur chaque match entre clients et MM promus.
+Ce projet met en pratique des concepts clés de la finance quantitative, du Big Data et du développement logiciel haute performance : asynchronisme (`asyncio`), stockage colonnaire optimisé (`Parquet`), flux de données temps réel (`JSON Lines`), et calculs de gestion des risques (PnL Mark-to-Market, inventaires, spreads).
 
 ---
 
-## 🛠️ Architecture du Système
+## Architecture du Projet
 
-### 1. Le Moteur de Matching (`MatchingEngine.py`)
-Le cœur du système qui centralise tous les ordres et fait correspondre les acheteurs avec le **Meilleur Prix Anonymisé** disponible parmi les différents MM actifs (le MM Original de la plateforme ou les MM promus).
+Le projet est articulé autour de 5 fichiers principaux, garantissant une séparation stricte des responsabilités (Modèle-Vue-Contrôleur) :
 
-### 2. Algorithme de Gouvernance (`Governance.py`)
-Pour garantir l'intégrité du marché et la gestion du cycle de vie des membres :
-* **Scouting d'Alpha :** Traitement statistique des métriques post-trade pour détecter le flux toxique/informé.
-* **Anti-Monopole :** Calcul de la concentration de la liquidité (Indice HHI) pour empêcher un seul MM externe de saturer le carnet d'ordres.
-* **Anonymat Total :** Les identités réelles des MM sont masquées derrière des alias (`LP-XXXXXX`) pour protéger leurs stratégies du reverse-engineering.
-
-### 3. Dashboard Temps Réel (`Dashboard.py`)
-Une interface opérateur complète développée sous **Streamlit** intégrant :
-* Le carnet d'ordres consolidé (Best Bid / Best Offer).
-* Le leaderboard anonymisé des fournisseurs de liquidité.
-* Le panneau de contrôle du volume et de passage d'ordres clients (Terminal Trader).
-* Le monitoring des commissions de courtage générées en direct.
+1. **`MarketTypes.py`** : Définition des structures de données financières de base (`Order`, `Trade`, `Quote`, `Side`, `Role`, `TraderProfile`) à l'aide de types énumérés et d'objets structurés.
+2. **`MatchingEngine.py`** : Cœur de la bourse. Gère le carnet d'ordres, l'exécution des ordres d'achat/vente par rapport aux cotations actives, et prélève une commission de 0,02 % sur les volumes financiers échangés.
+3. **`Governance.py`** : Module d'analyse quantitative. Il calcule en temps réel l'Alpha Score de chaque trader en mesurant l'impact de ses ordres sur le marché à court terme. Si les performances d'un trader automatique dépassent un certain seuil, la gouvernance le promeut automatiquement au rang de Market Maker (LP).
+4. **`main.py`** : Orchestrateur central de l'application. Il pilote la boucle asynchrone globale, simule l'activité de 15 robots de trading alternatifs, traite les demandes manuelles en provenance de l'interface, et interroge de manière non bloquante l'API Yahoo Finance avec un dispositif de sécurité (Timeout et Fallback).
+5. **`Dashboard.py`** : Interface graphique multi-profils (Streamlit) permettant d'explorer et d'interagir avec le marché sous trois angles métiers différents.
 
 ---
 
-## ⚖️ Différence Structurelle : Trader vs Market Maker
+## Fonctionnalités Clés et Concepts Mis en Œuvre
 
-Le passage du statut de client à celui de partenaire modifie radicalement la mécanique d'interaction avec l'infrastructure :
+### Concurrence et Asynchronisme (`asyncio`)
+Le moteur de matching et les 15 traders algorithmiques tournent simultanément de manière asynchrone. L'interrogation des cours de bourse réels internationaux (CME, ICE, CBOT via `yfinance`) s'effectue dans un thread de fond indépendant (`asyncio.to_thread`) avec un Timeout de 2 secondes maximum, évitant ainsi tout gel ou ralentissement du moteur, même le week-end lorsque les API de flux sont fermées.
 
-| Caractéristique | En tant que TRADER (Subit le marché) | En tant que MARKET_MAKER (Fait le marché) |
-| :--- | :--- | :--- |
-| **Type de Message** | Ordres directionnels et asymétriques (Achat OU Vente). | Message unique : La `Quote` (Double-Cote simultanée). |
-| **Exécution** | Doit séquencer ses ordres dans le temps pour ouvrir/fermer une position. | Affiche ses prix d'achat (Bid) et de vente (Ask) en continu. |
-| **Complexité** | Supporte la gestion du timing et le risque d'exécution. | Laisse le moteur insérer ses prix tout en haut du carnet via le badge *Verified LP*. |
-| **Rémunération** | Paye le spread ou la commission pour entrer sur le marché. | Capture le *spread* de manière passive en fournissant de la liquidité. |
+### Performance Big Data (`Parquet` et `JSON`)
+* **`dashboard_trades.parquet`** : L'historique complet de la bourse est sauvegardé au format Parquet (stockage colonnaire compressé). Ce format garantit des performances d'analyse quantitative optimales (Big Data) tout en isolant les structures de données pures de la bourse des données enrichies pour l'interface.
+* **`pending_orders.json`** : Fichier servant de bus de messages (Message Queue léger) permettant une communication asynchrone unidirectionnelle entre l'interface Streamlit et le moteur principal.
+
+### Gestion des Risques et Logique Métier Financière
+* **Vue Trader Client** : Permet de passer des ordres d'achat/vente manuels via un ticket d'ordre et de suivre l'historique de ses propres exécutions.
+* **Vue Market Maker Promu (LP)** : Permet aux fournisseurs de liquidité de piloter leurs expositions nettes (positions Long, Short ou Flat) sur 5 commodités majeures (`CL=F` Pétrole, `GC=F` Or, `NG=F` Gaz, `HG=F` Cuivre, `ZC=F` Maïs). Elle intègre un calcul dynamique du PnL Réalisé et du PnL Latent (Mark-to-Market) mis à jour selon le cours spot de l'API. Un terminal dédié permet d'injecter des Quotes personnalisées (Bid/Ask/Volume) en paramétrant un spread cible (%).
+* **Vue Opérateur Business** : Tour de contrôle offrant une visibilité à 360° sur la plateforme. Elle affiche le volume global, le nombre de transactions totales, le Chiffre d'Affaires réel généré par les commissions de la plateforme (0,02 %), le flux complet des transactions ainsi qu'un Leaderboard dynamique classant les teneurs de marché actifs avec leurs prix en direct.
 
 ---
 
-## 🚀 Stack Technique
+## Structure du Dépôt GitHub
 
-* **Langage :** Python 3.11+ (Optimisé pour Python 3.14+)
-* **Concurrence & Asynchronisme :** `asyncio` pour la gestion simultanée des flux de cotation et des carnets d'ordres.
-* **Stockage de Données :** `Pandas` & `PyArrow` (Format Parquet avec mécanisme d'écriture atomique via Shadow Writing).
-* **Communication Inter-Processus :** File d'attente asynchrone sur disque (`pending_orders.json`) assurant le découplage entre le serveur Web et le moteur d'exécution.
-* **Interface Graphique :** `Streamlit` avec architecture moderne en `st.fragment` pour le rafraîchissement haute fréquence.
+```bash
+├── Dashboard.py          # Interface utilisateur Streamlit (IHM multi-profils)
+├── MarketTypes.py        # Énumérations et modèles de données (Order, Trade, Quote...)
+├── MatchingEngine.py     # Logique de matching et gestion des carnets de spreads
+├── Governance.py         # Calcul de l'Alpha Score et promotion des traders
+├── main.py               # Orchestrator asynchrone principal & flux de l'API Yahoo Finance
+├── data/                 # Dossier local de stockage des données (généré automatiquement)
+│   ├── dashboard_trades.parquet  # Base colonnaire enrichie pour le Dashboard
+│   ├── executed_trades.parquet   # Historique brut pour le module de Gouvernance
+│   └── pending_orders.json       # Bus de communication IHM -> Moteur
+├── .gitignore            # Fichier d'exclusion pour conserver un dépôt propre
+└── README.md             # Présentation et documentation du projet (Ce fichier)
