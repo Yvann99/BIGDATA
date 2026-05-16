@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 
 # Import de tes modules locaux
-from MarketTypes import Order, Trade, Quote, Side, Role
+from MarketTypes import Order, Trade, Quote, Side, Role, TraderProfile
 from MatchingEngine import MatchingEngine
 from Governance import Governance
 
@@ -30,7 +30,7 @@ async def market_maker_behavior(mm_id, engine, product):
         await asyncio.sleep(0.2)
 
 async def trader_worker(trader_id, engine, governance):
-    """Simule un client envoyant des ordres."""
+    """Simule un client automatique envoyant des ordres."""
     for _ in range(ORDERS_PER_TRADER):
         product = random.choice(COMMODITIES)
         side = random.choice([Side.BUY, Side.SELL])
@@ -43,13 +43,13 @@ async def trader_worker(trader_id, engine, governance):
         await asyncio.sleep(random.uniform(0.1, 0.5))
 
 async def check_manual_orders(engine, governance):
-    """Consomme les ordres du Terminal Trader (Dashboard) en attente."""
+    """Consomme les ordres du Terminal Trader (Dashboard) et force l'exécution au marché."""
     path = 'data/pending_orders.json'
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return
-
+    print("Vérification du fichier JSON...")
     try:
-        # Lecture et vidage atomique de la file d'attente
+        # 1. Lecture et vidage immédiat de la file d'attente pour éviter les doublons
         with open(path, 'r+') as f:
             lines = f.readlines()
             f.seek(0)
@@ -60,9 +60,7 @@ async def check_manual_orders(engine, governance):
                 continue
             data = json.loads(line)
             
-            # Reconstruction de l'ordre client 
-            # Note : Si ton MatchingEngine gère les ordres limites via un paramètre prix, 
-            # tu pourras lui passer : price=data['price']
+            # 2. Reconstruction de l'ordre client manuel
             order = Order(
                 product=data['product'],
                 side=Side.BUY if data['side'] == "BUY" else Side.SELL,
@@ -70,15 +68,21 @@ async def check_manual_orders(engine, governance):
                 trader_id=data['trader_id']
             )
             
-            print(f"📥 [LIVE] Traitement ordre client : {order.side.value} {order.quantity} {order.product} (Limite: {data['price']}$)")
+            print(f"📥 [LIVE] Traitement ordre client : {order.side.value} {order.quantity} {order.product}")
             
-            # Exécution de l'ordre sur le carnet consolidé
-            trade = await engine.match_order(order)
+            # 3. FORCE LE MATCH AU MARCHÉ (price_limit=None) pour garantir l'exécution immédiate
+            trade = await engine.match_order(order, price_limit=None)
+            
             if trade:
+                # Enregistrement du profil du trader manuel dans la gouvernance s'il n'existe pas
+                if order.trader_id not in governance.traders:
+                    governance.traders[order.trader_id] = TraderProfile(trader_id=order.trader_id, role=Role.TRADER)
+                
+                # Mise à jour des statistiques et du CA
                 governance.update_trader_stats(trade, trade.execution_price)
-                print(f"🤝 [MATCH] Ordre client exécuté au prix de {trade.execution_price}$")
+                print(f"🤝 [MATCH SUCCESS] Ordre exécuté à {trade.execution_price}$ ! Compteurs mis à jour.")
             else:
-                print(f"❌ [MISSED] Aucun prix disponible sur le marché pour remplir l'ordre.")
+                print(f"❌ [MATCH FAILED] Manque de volume disponible pour remplir l'ordre.")
                 
     except Exception as e:
         print(f"⚠️ Erreur lors du traitement des ordres manuels : {e}")
@@ -97,8 +101,9 @@ async def main_orchestrator():
     trader_tasks = [asyncio.create_task(trader_worker(f"Trader_{i}", engine, gov)) for i in range(NB_TRADERS)]
 
     try:
-        while not all(t.done() for t in trader_tasks):
-            # 1. Vérification et consommation du flux d'ordres manuels (Dashboard)
+        # Boucle infinie pour maintenir le moteur actif indéfiniment pour la démo
+        while True:
+            # 1. Vérification et consommation immédiate du flux d'ordres manuels du Dashboard
             await check_manual_orders(engine, gov)
             
             # 2. Gestion des promotions via l'Alpha Score
@@ -118,6 +123,7 @@ async def main_orchestrator():
                 df.to_parquet('data/executed_trades.parquet.tmp', index=False)
                 os.replace('data/executed_trades.parquet.tmp', 'data/executed_trades.parquet')
             
+            # Fréquence d'interrogation haute performance (10 fois par seconde)
             await asyncio.sleep(0.1)
             
     except Exception as e:
