@@ -1,50 +1,32 @@
-# LiquidityHub - Simulateur de Marché Asynchrone et Tableau de Bord Multi-Profils
+# Finistech - Data-Driven Prop Trading Platform & Alpha Detection Engine
 
-LiquidityHub est une plateforme de simulation de marché financier (matching engine) développée en Python. Elle combine un moteur d'exécution d'ordres asynchrone connecté à l'API Yahoo Finance, un module de gouvernance algorithmique (Alpha Score), et une interface utilisateur interactive multi-profils développée avec Streamlit.
-
-Ce projet met en pratique des concepts clés de la finance quantitative, du Big Data et du développement logiciel haute performance : asynchronisme (`asyncio`), stockage colonnaire optimisé (`Parquet`), flux de données temps réel (`JSON Lines`), et calculs de gestion des risques (PnL Mark-to-Market, inventaires, spreads).
+Finistech est une plateforme de Prop Trading et un moteur d'évaluation quantitative asynchrone développés en Python. Le projet intègre un simulateur d'appariement d'ordres (Matching Engine) haute performance connecté au flux de données du CME Group (via Yahoo Finance), un module de Risk Management Big Data calculant l'Alpha Score et le Max Drawdown en temps réel, ainsi qu'une interface utilisateur multi-profils développée avec Streamlit.
 
 ---
 
-## Architecture du Projet
+## 💡 Genèse et Pivot Business (Démarche Itérative)
 
-Le projet est articulé autour de 5 fichiers principaux, garantissant une séparation stricte des responsabilités (Modèle-Vue-Contrôleur) :
+### Finistech V1 : L'infrastructure de marché low-margin (Idée Initiale)
+L'intention première était de concevoir un carnet d'ordres alternatif (MTF) où la plateforme agissait comme l'unique Teneur de Marché (Market Maker) initial. Pour capter le flux d'ordres, la stratégie reposait sur une tarification agressive (spreads ultra-serrés). Les traders les plus performants devaient ensuite être promus Teneurs de Marché.
 
-1. **`MarketTypes.py`** : Définition des structures de données financières de base (`Order`, `Trade`, `Quote`, `Side`, `Role`, `TraderProfile`) à l'aide de types énumérés et d'objets structurés.
-2. **`MatchingEngine.py`** : Cœur de la bourse. Gère le carnet d'ordres, l'exécution des ordres d'achat/vente par rapport aux cotations actives, et prélève une commission de 0,02 % sur les volumes financiers échangés.
-3. **`Governance.py`** : Module d'analyse quantitative. Il calcule en temps réel l'Alpha Score de chaque trader en mesurant l'impact de ses ordres sur le marché à court terme. Si les performances d'un trader automatique dépassent un certain seuil, la gouvernance le promeut automatiquement au rang de Market Maker (LP).
-4. **`main.py`** : Orchestrateur central de l'application. Il pilote la boucle asynchrone globale, simule l'activité de 15 robots de trading alternatifs, traite les demandes manuelles en provenance de l'interface, et interroge de manière non bloquante l'API Yahoo Finance avec un dispositif de sécurité (Timeout et Fallback).
-5. **`Dashboard.py`** : Interface graphique multi-profils (Streamlit) permettant d'explorer et d'interagir avec le marché sous trois angles métiers différents.
+### Le Reality Check (Limites de la V1)
+Le modèle V1 présentait des failles financières et structurelles majeures éliminées lors du pivot :
+1. **La Sélection Adverse (Toxic Flow) :** Afficher des spreads trop serrés face à des algorithmes de Trading Haute Fréquence (HFT) mieux informés condamnait la plateforme à accumuler du stock à perte.
+2. **Le Contresens de l'Alpha :** Un trader directionnel performant cherche à maximiser son *Edge* de manière confidentielle. Forcer ce profil à endosser le rôle de Market Maker (gérer des inventaires et afficher ses prix) est un non-sens métier.
+3. **Barrières Réglementaires :** Le statut de place de marché multilatérale exige des fonds propres réglementaires et des licences juridiques (MiFID II) hors de portée.
 
----
-
-## Fonctionnalités Clés et Concepts Mis en Œuvre
-
-### Concurrence et Asynchronisme (`asyncio`)
-Le moteur de matching et les 15 traders algorithmiques tournent simultanément de manière asynchrone. L'interrogation des cours de bourse réels internationaux (CME, ICE, CBOT via `yfinance`) s'effectue dans un thread de fond indépendant (`asyncio.to_thread`) avec un Timeout de 2 secondes maximum, évitant ainsi tout gel ou ralentissement du moteur, même le week-end lorsque les API de flux sont fermées.
-
-### Performance Big Data (`Parquet` et `JSON`)
-* **`dashboard_trades.parquet`** : L'historique complet de la bourse est sauvegardé au format Parquet (stockage colonnaire compressé). Ce format garantit des performances d'analyse quantitative optimales (Big Data) tout en isolant les structures de données pures de la bourse des données enrichies pour l'interface.
-* **`pending_orders.json`** : Fichier servant de bus de messages (Message Queue léger) permettant une communication asynchrone unidirectionnelle entre l'interface Streamlit et le moteur principal.
-
-### Gestion des Risques et Logique Métier Financière
-* **Vue Trader Client** : Permet de passer des ordres d'achat/vente manuels via un ticket d'ordre et de suivre l'historique de ses propres exécutions.
-* **Vue Market Maker Promu (LP)** : Permet aux fournisseurs de liquidité de piloter leurs expositions nettes (positions Long, Short ou Flat) sur 5 commodités majeures (`CL=F` Pétrole, `GC=F` Or, `NG=F` Gaz, `HG=F` Cuivre, `ZC=F` Maïs). Elle intègre un calcul dynamique du PnL Réalisé et du PnL Latent (Mark-to-Market) mis à jour selon le cours spot de l'API. Un terminal dédié permet d'injecter des Quotes personnalisées (Bid/Ask/Volume) en paramétrant un spread cible (%).
-* **Vue Opérateur Business** : Tour de contrôle offrant une visibilité à 360° sur la plateforme. Elle affiche le volume global, le nombre de transactions totales, le Chiffre d'Affaires réel généré par les commissions de la plateforme (0,02 %), le flux complet des transactions ainsi qu'un Leaderboard dynamique classant les teneurs de marché actifs avec leurs prix en direct.
+### Finistech V2 : Le Pivot Prop Trading Décentralisé (Modèle Actuel)
+Plutôt que de subir le risque de liquidité, Finistech exploite la force brute de son architecture de données pour devenir un **Hub de détection d'Alpha**. Le simulateur sert d'environnement d'évaluation (Challenge). Grâce au Big Data, la plateforme filtre et identifie les traders dotés d'un réel avantage statistique (flux non toxique), élimine le biais de la chance, et leur alloue un capital théorique dont la performance pourra être répliquée sur les marchés réels.
 
 ---
 
-## Structure du Dépôt GitHub
+## 🏗️ Architecture Technique & Organisation des Fichiers
+
+L'application est découpée selon une séparation stricte des responsabilités (approche événementielle et découplage des données) :
 
 ```bash
-├── Dashboard.py          # Interface utilisateur Streamlit (IHM multi-profils)
-├── MarketTypes.py        # Énumérations et modèles de données (Order, Trade, Quote...)
-├── MatchingEngine.py     # Logique de matching et gestion des carnets de spreads
-├── Governance.py         # Calcul de l'Alpha Score et promotion des traders
-├── main.py               # Orchestrator asynchrone principal & flux de l'API Yahoo Finance
-├── data/                 # Dossier local de stockage des données (généré automatiquement)
-│   ├── dashboard_trades.parquet  # Base colonnaire enrichie pour le Dashboard
-│   ├── executed_trades.parquet   # Historique brut pour le module de Gouvernance
-│   └── pending_orders.json       # Bus de communication IHM -> Moteur
-├── .gitignore            # Fichier d'exclusion pour conserver un dépôt propre
-└── README.md             # Présentation et documentation du projet (Ce fichier)
+├── MarketTypes.py        # Enums et structures de données financières (Order, Trade, Quote, TraderProfile)
+├── MatchingEngine.py     # Cœur algorithmique de la bourse : carnet d'ordres et calcul des commissions
+├── Governance.py         # Module de Risk Management : calcul de l'Alpha Score et barrières de Max Drawdown
+├── main.py               # Orchestrator asynchrone principal & ingestion des flux Yahoo Finance
+└── Dashboard.py          # Interface graphique multi-profils interactive (Streamlit)
