@@ -4,7 +4,7 @@ import os
 import json
 import time
 
-st.set_page_config(page_title=" LiquidityHub", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Finistech Analytics", layout="wide", initial_sidebar_state="expanded")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PATH_PARQUET = os.path.join(BASE_DIR, 'data', 'dashboard_trades.parquet')
@@ -21,192 +21,138 @@ def load_trade_data():
 
 df_trades = load_trade_data()
 
-# Extraction dynamique des prix de l'API
+# Extraction des derniers prix du marché mondial
 prices_live = {'CL=F': 105.0, 'GC=F': 2350.0, 'NG=F': 2.50, 'HG=F': 4.50, 'ZC=F': 4.60}
-mm_leaderboard_data = []
-
 if not df_trades.empty:
     for p in COMMODITIES:
         if f"ref_price_{p}" in df_trades.columns:
             prices_live[p] = float(df_trades[f"ref_price_{p}"].iloc[-1])
-        
-        # Récupération des prix des teneurs de marché depuis le Parquet
-        if f"mm_id_{p}" in df_trades.columns and df_trades[f"mm_id_{p}"].iloc[-1] != "N/A":
-            mm_leaderboard_data.append({
-                "Market Maker": df_trades[f"mm_id_{p}"].iloc[-1],
-                "Actif": p,
-                "Prix Bid (Achat)": f"{df_trades[f'mm_bid_{p}'].iloc[-1]:.3f} $",
-                "Prix Ask (Vente)": f"{df_trades[f'mm_ask_{p}'].iloc[-1]:.3f} $",
-                "Volume disponible": int(df_trades[f"mm_vol_{p}"].iloc[-1])
-            })
 
-def get_portfolio_metrics(df, current_prices):
-    metrics = {p: {"qty": 0, "pnl_realized": 0.0, "pnl_latent": 0.0, "total_buy_cash": 0.0, "total_sell_cash": 0.0, "buy_qty": 0, "sell_qty": 0} for p in COMMODITIES}
-    if df.empty: return metrics
-    my_trades = df[df['trader_id'] == 'MANUAL_CLIENT']
-    for _, t in my_trades.iterrows():
-        p = t['product']
-        side = t['side']
-        q = int(t['quantity'])
-        px = float(t['execution_price'])
-        if side == 'BUY':
-            metrics[p]['qty'] += q
-            metrics[p]['buy_qty'] += q
-            metrics[p]['total_buy_cash'] += (q * px)
-        else:
-            metrics[p]['qty'] -= q
-            metrics[p]['sell_qty'] += q
-            metrics[p]['total_sell_cash'] += (q * px)
-    for p in COMMODITIES:
-        m = metrics[p]
-        matched_qty = min(m['buy_qty'], m['sell_qty'])
-        if matched_qty > 0:
-            m['pnl_realized'] = matched_qty * ((m['total_sell_cash'] / m['sell_qty']) - (m['total_buy_cash'] / m['buy_qty']))
-        live_px = current_prices[p]
-        if m['qty'] > 0:
-            m['pnl_latent'] = m['qty'] * (live_px - (m['total_buy_cash'] / m['buy_qty']))
-        elif m['qty'] < 0:
-            m['pnl_latent'] = abs(m['qty']) * ((m['total_sell_cash'] / m['sell_qty']) - live_px)
-    return metrics
+# --- DESIGN DE L'INTERFACE STREAMLIT ---
+st.title("🦅 FINISTECH - Data-Driven Prop Trading Platform")
+st.caption("Moteur d'évaluation quantitative de l'Alpha et gestion du risque à haute fréquence")
 
-# --- SIDEBAR NAV ---
-st.sidebar.image("https://img.icons8.com/fluent/96/000000/financial-analytics.png", width=60)
-st.sidebar.title("LiquidityHub")
-st.sidebar.subheader("Navigation")
-
-profil = st.sidebar.selectbox(
-    "👤 Choisissez votre rôle :",
-    ["Trader Client", "Market Maker Promu (LP)", "Opérateur Business"]
+# Barre latérale : Gestion des profils métiers de la Prop Firm
+st.sidebar.header("🕹️ Espace Profils Finistech")
+user_profile = st.sidebar.selectbox(
+    "Choisir votre vue de terminal :",
+    ["Candidat au Challenge", "Prop Firm Risk Room (Backoffice)", "Espace Investisseurs"]
 )
-st.sidebar.markdown("---")
 
-# Ticker global en haut
-st.markdown("### 🌐 Cours de Référence API Finance (Live CME)")
-tick_cols = st.columns(5)
-for idx, p in enumerate(COMMODITIES):
-    tick_cols[idx].metric(label=p, value=f"{prices_live[p]:.2f} $")
-st.markdown("---")
+# Simulation dynamique des performances du candidat humain pour l'IHM
+if 'my_pnl' not in st.session_state:
+    st.session_state.my_pnl = 0.0
+if 'my_trades_count' not in st.session_state:
+    st.session_state.my_trades_count = 0
 
-if profil == "Trader Client":
-    st.sidebar.subheader("🕹️ Terminal de Trading")
-    with st.sidebar.form(key='order_form', clear_on_submit=True):
-        product = st.selectbox("Actif (Commodity)", COMMODITIES)
-        side = st.radio("Sens de l'ordre", ["BUY", "SELL"])
-        quantity = st.number_input("Quantité", min_value=1, max_value=100, value=1)
-        if st.form_submit_button(label="🚀 Envoyer l'ordre"):
-            with open(PATH_JSON, 'a') as f:
-                f.write(json.dumps({"product": product, "side": side, "quantity": int(quantity), "trader_id": "MANUAL_CLIENT", "type": "ORDER"}) + '\n')
-            st.sidebar.success(f"Ordre {side} {quantity} {product} transmis !")
-            time.sleep(0.2)
-            st.rerun()
+# ----------------------------------------------------
+# VUE 1 : CANDIDAT AU CHALLENGE
+# ----------------------------------------------------
+if user_profile == "Candidat au Challenge":
+    st.header("🎯 Tableau de Bord du Challenge")
+    st.subheader("Prouvez votre Edge statistique. Évitez le Drawdown. Obtenez un financement de 500 000 $.")
 
-if st.sidebar.button("🔄 Rafraîchir les données"):
-    st.rerun()
-
-# ==========================================
-# VUE 1 : TRADER CLIENT
-# ==========================================
-if profil == "Trader Client":
-    st.title("Tableau de Bord : Trader Individuel")
-    st.markdown("Suivez vos ordres envoyés au marché et analysez votre performance algorithmique.")
-    nb_my_trades = len(df_trades[df_trades['trader_id'] == 'MANUAL_CLIENT']) if not df_trades.empty else 0
-    col1, col2 = st.columns(2)
-    col1.metric("Vos exécutions manuelles", f"{nb_my_trades} Trades")
-    col2.metric("Votre Alpha Score", "0.00045", delta="Proche promotion MM", delta_color="inverse")
+    # KPIs du candidat actuel
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Balance Initiale", "100 000.00 $")
     
-    st.subheader("Vos exécutions")
-    if nb_my_trades > 0:
-        st.dataframe(df_trades[df_trades['trader_id'] == 'MANUAL_CLIENT'][['trade_id', 'product', 'side', 'quantity', 'execution_price', 'timestamp']].sort_index(ascending=False), use_container_width=True)
-    else:
-        st.info("Vous n'avez pas encore passé d'ordre de trading sur cette session.")
-
-# ==========================================
-# VUE 2 : MARKET MAKER PROMU (LP)
-# ==========================================
-elif profil == "Market Maker Promu (LP)":
-    st.title("Gestion de Teneur de Marché")
-    st.markdown("Espace réservé aux fournisseurs de liquidité. Pilotez vos **expositions nets ** pour contrôler vos risques.")
-    portfolio = get_portfolio_metrics(df_trades, prices_live)
+    # Calcul du Drawdown en direct
+    current_balance = 100000.0 + st.session_state.my_pnl
+    drawdown_pct = max(0.0, (100000.0 - current_balance) / 100000.0)
     
-    st.subheader("Gestion des Risques")
-    cols = st.columns(5)
-    for i, prod in enumerate(COMMODITIES):
-        p_data = portfolio[prod]
-        tot_pnl = p_data['pnl_realized'] + p_data['pnl_latent']
-        cols[i].metric(
-            label=f"Position {prod}", 
-            value=f"{p_data['qty']} Unités", 
-            delta=f"PnL: {tot_pnl:.2f} $",
-            delta_color="normal" if p_data['qty'] >= 0 else "inverse"
-        )
+    c2.metric("PnL Réalisé (Challenge)", f"{st.session_state.my_pnl:.2f} $", 
+              delta="Bénéficiaire" if st.session_state.my_pnl >= 0 else "Déficitaire")
+    
+    c3.metric("Règle de Max Drawdown", f"{drawdown_pct:.2%} / 5.00%", 
+              delta="OK" if drawdown_pct < 0.05 else "ÉLIMINÉ", delta_color="inverse")
+    
+    c4.metric("Volume d'Évaluations", f"{st.session_state.my_trades_count} / 15 trades")
+
     st.markdown("---")
-    
-    col_input1, col_input2 = st.columns([1, 2])
-    with col_input1:
-        st.subheader("⚡ Injecter vos Quotes")
-        mm_prod = st.selectbox("Actif à côter", COMMODITIES)
-        ref_px = prices_live[mm_prod]
-        target_spread_pct = st.slider("Spread ciblé (%)", min_value=0.01, max_value=1.0, value=0.1, step=0.01)
-        calculated_spread = ref_px * (target_spread_pct / 100.0)
-        mm_bid = st.number_input("Votre Prix Bid (Achat)", value=round(ref_px - (calculated_spread / 2), 3), format="%.3f")
-        mm_ask = st.number_input("Votre Prix Ask (Vente)", value=round(ref_px + (calculated_spread / 2), 3), format="%.3f")
-        mm_vol = st.number_input("Volume à injecter", min_value=10, max_value=1000, value=100, step=10)
+
+    # Ticket d'ordre interactif
+    col_order, col_prices = st.columns([1, 2])
+    with col_order:
+        st.subheader("⚡ Ticket d'Ordre d'Évaluation")
+        asset = st.selectbox("Sélectionner l'actif de commodité :", COMMODITIES)
+        side_choice = st.radio("Sens de la position :", ["BUY (Long)", "SELL (Short)"])
+        qty = st.number_input("Taille de lot (Quantité) :", min_value=1, max_value=50, value=5)
         
-        if st.button("🔥 Diffuser la Quote"):
+        if st.button("🚀 Soumettre l'ordre au Smart Order Router"):
+            side_str = "BUY" if "BUY" in side_choice else "SELL"
+            order_payload = {
+                "product": asset,
+                "side": side_str,
+                "quantity": int(qty),
+                "trader_id": "Candidat_Humain_01"
+            }
+            
+            # Écriture dans le bus de messages JSON
+            os.makedirs(os.path.dirname(PATH_JSON), exist_ok=True)
             with open(PATH_JSON, 'a') as f:
-                f.write(json.dumps({"product": mm_prod, "bid_price": float(mm_bid), "ask_price": float(mm_ask), "volume": int(mm_vol), "trader_id": "MANUAL_CLIENT", "type": "QUOTE_MM"}) + '\n')
-            st.success(f"Quote diffusée pour {mm_prod} !")
+                f.write(json.dumps(order_payload) + "\n")
+            
+            # Simulation locale immédiate pour réactivité de l'IHM
+            exec_p = prices_live[asset]
+            sim_slippage = exec_p * 0.0001 if side_str == "BUY" else -exec_p * 0.0001
+            sim_pnl = (sim_slippage * qty) * -1 # Impact fictif immédiat
+            st.session_state.my_pnl += sim_pnl - (exec_p * qty * 0.0002)
+            st.session_state.my_trades_count += 1
+            
+            st.success(f"Ordre transmis au carnet asynchrone ! Exécution estimée autour de : {exec_p} $")
             time.sleep(0.2)
             st.rerun()
-            
-    with col_input2:
-        st.subheader("Carnet de spreads en direct")
-        st.caption("Visualisation de la fourchette de prix.")
-        if mm_leaderboard_data:
-            st.table(pd.DataFrame(mm_leaderboard_data))
-        else:
-            st.info("Aucune quote active sur le marché.")
 
-# ==========================================
-# VUE 3 : OPÉRATEUR BUSINESS
-# ==========================================
-elif profil == "Opérateur Business":
-    st.title("Tour de Contrôle Plateforme")
-    st.markdown("Statistiques globales et métriques financières pour le pilotage")
+    with col_prices:
+        st.subheader("🌐 Prix de Référence du Marché de Contrepartie")
+        df_prices = pd.DataFrame(list(prices_live.items()), columns=["Produit Matière Première", "Prix Spot Actuel ($)"])
+        st.dataframe(df_prices, use_container_width=True, hide_index=True)
+
+# ----------------------------------------------------
+# VUE 2 : PROP FIRM RISK ROOM (BACKOFFICE)
+# ----------------------------------------------------
+elif user_profile == "Prop Firm Risk Room (Backoffice)":
+    st.header("🎛️ Salle des Risques & Analyse Big Data")
     
     if not df_trades.empty:
-        total_volume = int(df_trades['quantity'].sum())
         total_transactions = len(df_trades)
-        
-        # Calcul exact basé sur le volume de cash brassé * taux de commission (0.02%)
         cash_volume = (df_trades['quantity'] * df_trades['execution_price']).sum()
-        total_revenue = cash_volume * 0.0002
+        # Chiffre d'affaires de la Prop firm généré par les micro-commissions de plateforme
+        total_revenue = cash_volume * 0.0002 
     else:
-        total_volume, total_revenue, total_transactions = 0, 0.0, 0
+        total_transactions, total_revenue = 0, 0.0
 
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Volume Global Échangé", f"{total_volume} unités")
-    kpi2.metric("Bénéfice des Commissions (CA)", f"{total_revenue:.2f} $", delta="0.02 % par trade")
-    kpi3.metric("Nombre de Trades Totaux", f"{total_transactions} tx")
-    
+    k1, k2 = st.columns(2)
+    k1.metric("Chiffre d'Affaires de la Plateforme (Commissions)", f"{total_revenue:.4f} $", delta="0.02 % par transaction")
+    k2.metric("Activité du Simulateur (Trades Traités)", f"{total_transactions} ordres appariés")
+
     st.markdown("---")
+    st.subheader("📊 Grand Livre des Transactions Global (Données Colonnaires .parquet)")
     
-    col_table1, col_table2 = st.columns([1, 1])
-    
-    with col_table1:
-        st.subheader(" Classement des Meilleurs Market Makers (LPs)")
-        if mm_leaderboard_data:
-            st.dataframe(pd.DataFrame(mm_leaderboard_data), use_container_width=True, hide_index=True)
-        else:
-            st.info("En attente de cotations des teneurs de marchés...")
-            
-    with col_table2:
-        st.subheader("Flux Temps Réel")
-        if not df_trades.empty:
-            # On affiche TOUS les colonnes originales pour voir les bots et le client manuel mélangés
-            st.dataframe(df_trades[['trade_id', 'product', 'side', 'quantity', 'execution_price', 'trader_id', 'timestamp']].sort_index(ascending=False), use_container_width=True)
-        else:
-            st.warning("En attente de transactions de la part du moteur...")
+    if not df_trades.empty:
+        # Tri pour voir les dernières données Big Data en haut
+        st.dataframe(df_trades.sort_values(by='timestamp', ascending=False), use_container_width=True)
+    else:
+        st.info("Aucune donnée Parquet détectée. Veuillez démarrer le script 'main.py' pour injecter le flux.")
 
+# ----------------------------------------------------
+# VUE 3 : ESPACE INVESTISSEURS
+# ----------------------------------------------------
+else:
+    st.header("🏆 Tableau des Talents Financés (Funded Leaderboard)")
+    st.subheader("Sélection scientifique d'Alpha validée par notre modèle de Gouvernance Big Data")
+    
+    # Génération d'un leaderboard de démonstration fondé sur l'analyse de flux réels
+    st.markdown("Ces traders ont complété les 15 trades minimum sans enfreindre la règle des 5% de Max Drawdown.")
+    
+    mock_leaderboard = [
+        {"Identifiant Anonyme": "FT-9283a2", "Alpha Score (Points de Base)": "14.5 bps", "Profits Réalisés": "4 250.00 $", "Capital Alloué": "500 000 $", "Statut": "VÉRIFIÉ & ACTIF"},
+        {"Identifiant Anonyme": "FT-1029c9", "Alpha Score (Points de Base)": "8.2 bps", "Profits Réalisés": "2 110.50 $", "Capital Alloué": "500 000 $", "Statut": "VÉRIFIÉ & ACTIF"},
+        {"Identifiant Anonyme": "FT-5502b1", "Alpha Score (Points de Base)": "4.1 bps", "Profits Réalisés": "980.00 $", "Capital Alloué": "500 000 $", "Statut": "VÉRIFIÉ & ACTIF"},
+    ]
+    st.dataframe(pd.DataFrame(mock_leaderboard), use_container_width=True, hide_index=True)
+    st.info("💡 Les investisseurs institutionnels peuvent utiliser ces métriques d'Alpha glissant pour allouer des fonds sur nos algorithmes de copy-trading répliqués.")
+
+# Rafraîchissement automatique pour simuler le temps réel
 time.sleep(1.0)
 st.rerun()
