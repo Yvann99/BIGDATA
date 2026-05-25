@@ -3,14 +3,15 @@ from typing import Dict, List
 from MarketTypes import Trade, TraderProfile, Role, Side
 
 class Governance:
-    def __init__(self, promotion_threshold: float = 0.0005, min_trades: int = 50):
+    def __init__(self, target_alpha: float = 0.0001, min_trades: int = 15, max_drawdown_pct: float = 0.05):
         self.profiles: Dict[str, TraderProfile] = {}
-        self.promotion_threshold = promotion_threshold  # Edge moyen > 0.05%
-        self.min_trades = min_trades
-        self.market_dominance_limit = 0.70  # Un MM ne peut pas peser > 70% du volume
+        self.target_alpha = target_alpha        # Alpha minimum requis (ex: 1 point de base)
+        self.min_trades = min_trades            # Nombre minimum d'exécutions pour valider le test
+        self.max_drawdown_pct = max_drawdown_pct  # 5% de perte max autorisée sous peine d'élimination
+        self.initial_balance = 100000.0         # Balance théorique de départ du compte d'évaluation
 
     def update_trader_stats(self, trade: Trade, current_market_mid: float):
-        """Analyse la performance d'un trader après chaque exécution."""
+        """Analyse en temps réel la performance et le risque du candidat au challenge."""
         t_id = trade.trader_id
         if t_id not in self.profiles:
             self.profiles[t_id] = TraderProfile(trader_id=t_id)
@@ -18,8 +19,19 @@ class Governance:
         prof = self.profiles[t_id]
         prof.total_volume += trade.quantity
         
-        # Calcul de l'Edge (Sélection Adverse)
-        # Si le client achète et que le prix monte ensuite -> il est "informé"
+        # 1. Calcul du PnL simulé du trade pour le suivi du Drawdown
+        trade_value = trade.execution_price * trade.quantity
+        if trade.side == Side.BUY:
+            # Si le trader achète, une hausse du mid génère du PnL
+            pnl_impact = (current_market_mid - trade.execution_price) * trade.quantity
+        else:
+            # Si le trader vend, une baisse du mid génère du PnL
+            pnl_impact = (trade.execution_price - current_market_mid) * trade.quantity
+            
+        prof.realized_pnl += pnl_impact - trade.commission
+
+        # 2. Calcul de l'Edge (Sélection Adverse / Alpha)
+        # Mesure si le trader entre au bon moment avant un mouvement de prix
         if trade.side == Side.BUY:
             edge = (current_market_mid - trade.execution_price) / trade.execution_price
         else:
@@ -27,54 +39,44 @@ class Governance:
         
         prof.edge_history.append(edge)
         
-        # Mise à jour du score Alpha (moyenne mobile des derniers bords)
+        # Fenêtre glissante sur les 100 derniers trades pour l'Alpha glissant
         if len(prof.edge_history) > 100:
             prof.edge_history.pop(0)
         prof.alpha_score = np.mean(prof.edge_history)
 
+        # 3. Surveillance du Risque (Drawdown)
+        current_balance = self.initial_balance + prof.realized_pnl
+        loss_pct = (self.initial_balance - current_balance) / self.initial_balance
+        
+        if loss_pct > self.max_drawdown_pct:
+            if prof.role != Role.CHALLENGE_CANDIDATE:
+                print(f"🚨 ALERTE RISK MANAGEMENT : Trader Financé {t_id} a violé la règle de Drawdown ({loss_pct:.2%}).")
+            prof.is_verified = False
+            prof.allocated_capital = 0.0
+
     def evaluate_promotions(self) -> List[str]:
-        """Identifie les traders qui doivent devenir Market Makers."""
+        """Analyse la base colonnaire pour identifier les candidats ayant réussi le challenge."""
         promoted_ids = []
         for t_id, prof in self.profiles.items():
-            if prof.role == Role.TRADER and len(prof.edge_history) >= self.min_trades:
-                if prof.alpha_score > self.promotion_threshold:
-                    prof.role = Role.MARKET_MAKER
-                    prof.allocated_liquidity = 1000000.0  # Allocation initiale
+            # Critères de réussite : Rôle de candidat, volume de trades suffisant, Alpha positif, et PnL positif
+            if prof.role == Role.CHALLENGE_CANDIDATE and len(prof.edge_history) >= self.min_trades:
+                if prof.alpha_score > self.target_alpha and prof.realized_pnl > 0:
+                    prof.role = Role.FUNDED_TRADER
+                    prof.is_verified = True
+                    prof.allocated_capital = 500000.0  # Allocation d'un demi-million de capital réel/répliqué
                     promoted_ids.append(t_id)
         return promoted_ids
 
-    def check_market_integrity(self, trades: List[Trade]) -> Dict[str, float]:
-        """
-        Calcule la dominance de chaque MM. 
-        Si un MM devient 'le marché', il faut lever une alerte.
-        """
-        if not trades:
-            return {}
-            
-        total_vol = sum(t.quantity for t in trades)
-        mm_volumes = {}
-        
-        for t in trades:
-            mm_volumes[t.mm_id] = mm_volumes.get(t.mm_id, 0) + t.quantity
-            
-        dominance = {mm: vol/total_vol for mm, vol in mm_volumes.items()}
-        
-        # Alertes de gouvernance
-        for mm, share in dominance.items():
-            if share > self.market_dominance_limit:
-                print(f"⚠️ ALERTE GOUVERNANCE : Dominance excessive de {mm} ({share:.2%})")
-                
-        return dominance
-
-    def get_mm_leaderboard(self):
-        """Prépare les données pour le Dashboard anonyme."""
+    def get_funded_leaderboard(self):
+        """Prépare les statistiques d'Alpha pour les investisseurs et le dashboard d'administration."""
         leaderboard = []
         for t_id, prof in self.profiles.items():
-            if prof.role == Role.MARKET_MAKER:
+            if prof.role == Role.FUNDED_TRADER and prof.is_verified:
                 leaderboard.append({
-                    "id_anonyme": f"LP-{t_id[:6]}",
-                    "alpha_score": round(prof.alpha_score * 10000, 2), # En points de base
-                    "volume_total": prof.total_volume,
-                    "statut": "Actif"
+                    "id_anonyme": f"FT-{t_id[:6]}",
+                    "alpha_score": round(prof.alpha_score * 10000, 2), # Exprimé en points de base (bps)
+                    "pnl_cumule": round(prof.realized_pnl, 2),
+                    "capital_alloue": prof.allocated_capital,
+                    "statut": "Actif (Verified)"
                 })
         return sorted(leaderboard, key=lambda x: x['alpha_score'], reverse=True)
